@@ -82,14 +82,31 @@ def setup_pipe():
     print(f"이벤트 파이프 생성: {PIPE_PATH}")
 
 
+def try_connect_pipe():
+    """파이프 연결 시도 (non-blocking)"""
+    try:
+        return os.open(PIPE_PATH, os.O_WRONLY | os.O_NONBLOCK)
+    except OSError:
+        return None
+
+
 def send_event(pipe_fd, event_type):
-    """파이프로 이벤트 전송 (non-blocking)"""
+    """파이프로 이벤트 전송 (non-blocking), 연결 안 됐으면 재시도"""
+    # 연결 안 됐으면 재시도
     if pipe_fd is None:
-        return
+        pipe_fd = try_connect_pipe()
+        if pipe_fd is not None:
+            print("파이프 연결됨 (외부 수신자 감지)")
+
+    if pipe_fd is None:
+        return pipe_fd
+
     try:
         os.write(pipe_fd, f"{event_type}\n".encode())
     except (BrokenPipeError, BlockingIOError, OSError):
         pass  # 수신자가 없거나 버퍼가 찼으면 무시
+
+    return pipe_fd
 
 
 def main():
@@ -192,7 +209,7 @@ def main():
                 elif current_time - eye_closed_start >= DROWSY_TIME:
                     if not is_drowsy:
                         print(f"[DEBUG] 졸림 감지! - {DROWSY_TIME}초 경과")
-                        send_event(pipe_fd, "DROWSY")
+                        pipe_fd = send_event(pipe_fd, "DROWSY")
                     is_drowsy = True
             else:
                 if eye_closed_start is not None:
@@ -207,7 +224,7 @@ def main():
                 elif current_time - yawn_start >= YAWN_TIME:
                     if not is_yawning:
                         print(f"[DEBUG] 하품 감지!")
-                        send_event(pipe_fd, "YAWN")
+                        pipe_fd = send_event(pipe_fd, "YAWN")
                     is_yawning = True
             else:
                 yawn_start = None

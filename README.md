@@ -46,19 +46,8 @@ bunzip2 shape_predictor_68_face_landmarks.dat.bz2
 
 ## 사용법
 
-### 기본 실행 (내장 카메라)
 ```bash
 python main.py
-```
-
-### 특정 카메라 사용
-```bash
-python main.py -c 1  # 카메라 인덱스 1 사용 (예: iPhone 연속성 카메라)
-```
-
-### 사용 가능한 카메라 목록 확인
-```bash
-python main.py -l
 ```
 
 ## 화면 구성
@@ -86,11 +75,13 @@ python main.py -l
 
 - macOS (경고음 재생에 `afplay` 사용)
 - Python 3.x
-- 웹캠 또는 연속성 카메라
+- MacBook 내장 카메라
 
 ## 외부 프로그램 연동
 
 졸림/하품 감지 시 Named Pipe를 통해 이벤트를 전송합니다. 외부 프로그램에서 실시간으로 상태를 수신할 수 있습니다.
+
+> **Note**: main.py 실행 후 언제든지 리스너를 연결할 수 있습니다. 리스너가 연결되면 자동으로 감지하여 이벤트 전송을 시작합니다.
 
 ### 이벤트 종류
 
@@ -109,7 +100,23 @@ python main.py
 python event_listener.py
 ```
 
-### 직접 구현 시
+### 예제 프로그램
+
+`examples/` 폴더에 다양한 활용 예제가 있습니다.
+
+| 예제 | 설명 |
+|-----|------|
+| `drowsy_alert_example.py` | 시스템 사운드 + 알림 센터 + 로그 파일 |
+| `drowsy_webhook_example.py` | Slack/Discord/커스텀 서버로 HTTP 전송 |
+| `drowsy_automation_example.py` | 화면 밝기, 음악 제어, TTS 음성 경고 |
+| `drowsy_statistics_example.py` | 통계 수집 및 피로도 분석 리포트 |
+
+```bash
+# 예제 실행
+python examples/drowsy_alert_example.py
+```
+
+### 직접 구현 시 (Python)
 
 ```python
 PIPE_PATH = "/tmp/face_status_pipe"
@@ -123,6 +130,61 @@ with open(PIPE_PATH, 'r') as pipe:
         elif event == "YAWN":
             # 하품 감지 시 처리
             pass
+```
+
+### 다른 언어로 구현
+
+#### Shell Script
+
+```bash
+#!/bin/bash
+while read event; do
+    case "$event" in
+        DROWSY) echo "졸림 감지!" ;;
+        YAWN) echo "하품 감지!" ;;
+    esac
+done < /tmp/face_status_pipe
+```
+
+#### Node.js
+
+```javascript
+const fs = require('fs');
+const pipe = fs.createReadStream('/tmp/face_status_pipe', { encoding: 'utf8' });
+
+pipe.on('data', (data) => {
+    data.trim().split('\n').forEach(event => {
+        if (event === 'DROWSY') console.log('졸림 감지!');
+        else if (event === 'YAWN') console.log('하품 감지!');
+    });
+});
+```
+
+#### Go
+
+```go
+package main
+
+import (
+    "bufio"
+    "fmt"
+    "os"
+)
+
+func main() {
+    pipe, _ := os.Open("/tmp/face_status_pipe")
+    defer pipe.Close()
+
+    scanner := bufio.NewScanner(pipe)
+    for scanner.Scan() {
+        switch scanner.Text() {
+        case "DROWSY":
+            fmt.Println("졸림 감지!")
+        case "YAWN":
+            fmt.Println("하품 감지!")
+        }
+    }
+}
 ```
 
 ## 종료
