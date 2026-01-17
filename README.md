@@ -8,6 +8,7 @@
 - **졸림 감지**: EAR (Eye Aspect Ratio) 알고리즘으로 눈 감김 상태 측정
 - **하품 감지**: MAR (Mouth Aspect Ratio) 알고리즘으로 하품 감지
 - **실시간 경고**: 졸림/하품 감지 시 시각적 경고 및 macOS 시스템 경고음 재생
+- **외부 연동**: Named Pipe를 통해 외부 프로그램에 이벤트 전송
 
 ## 기술 스택
 
@@ -86,6 +87,43 @@ python main.py -l
 - macOS (경고음 재생에 `afplay` 사용)
 - Python 3.x
 - 웹캠 또는 연속성 카메라
+
+## 외부 프로그램 연동
+
+졸림/하품 감지 시 Named Pipe를 통해 이벤트를 전송합니다. 외부 프로그램에서 실시간으로 상태를 수신할 수 있습니다.
+
+### 이벤트 종류
+
+| 이벤트 | 설명 |
+|-------|------|
+| `DROWSY` | 졸림 감지됨 (눈 2초 이상 감음) |
+| `YAWN` | 하품 감지됨 (입 1초 이상 벌림) |
+
+### 사용 예시
+
+```bash
+# 터미널 1: 얼굴 인식 프로그램 실행
+python main.py
+
+# 터미널 2: 이벤트 리스너 실행
+python event_listener.py
+```
+
+### 직접 구현 시
+
+```python
+PIPE_PATH = "/tmp/face_status_pipe"
+
+with open(PIPE_PATH, 'r') as pipe:
+    while True:
+        event = pipe.readline().strip()
+        if event == "DROWSY":
+            # 졸림 감지 시 처리
+            pass
+        elif event == "YAWN":
+            # 하품 감지 시 처리
+            pass
+```
 
 ## 종료
 

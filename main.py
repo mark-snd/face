@@ -14,6 +14,10 @@ import os
 import subprocess
 import time
 import argparse
+import stat
+
+# Named Pipe 경로
+PIPE_PATH = "/tmp/face_status_pipe"
 
 # 설정값
 EAR_THRESHOLD = 0.22  # 눈 감김 판단 임계값 (낮을수록 더 감아야 감지)
@@ -70,6 +74,22 @@ def play_alert_sound():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL
     )
+
+
+def setup_pipe():
+    """Named Pipe 생성"""
+    if os.path.exists(PIPE_PATH):
+        os.remove(PIPE_PATH)
+    os.mkfifo(PIPE_PATH, mode=stat.S_IRUSR | stat.S_IWUSR)
+    print(f"이벤트 파이프 생성: {PIPE_PATH}")
+
+
+def send_event(pipe_fd, event_type):
+    """파이프로 이벤트 전송 (non-blocking)"""
+    try:
+        os.write(pipe_fd, f"{event_type}\n".encode())
+    except (BrokenPipeError, BlockingIOError):
+        pass  # 수신자가 없거나 버퍼가 찼으면 무시
 
 
 def list_cameras():
@@ -148,6 +168,10 @@ def main():
     current_ear = 0          # 현재 EAR 값
     current_mar = 0          # 현재 MAR 값
 
+    # Named Pipe 설정 (non-blocking 쓰기 모드)
+    setup_pipe()
+    pipe_fd = os.open(PIPE_PATH, os.O_WRONLY | os.O_NONBLOCK)
+
     # 카메라 시작
     print(f"카메라 {camera_index} 연결 중...")
     cap = cv2.VideoCapture(camera_index)
@@ -207,12 +231,13 @@ def main():
                 elif current_time - eye_closed_start >= DROWSY_TIME:
                     if not is_drowsy:
                         print(f"[DEBUG] 졸림 감지! - {DROWSY_TIME}초 경과")
+                        send_event(pipe_fd, "DROWSY")
                     is_drowsy = True
             else:
                 if eye_closed_start is not None:
                     print(f"[DEBUG] 눈 뜸 - EAR: {current_ear:.3f}")
                 eye_closed_start = None
-                is_drowsy = False  # 눈을 뜨면 졸림 해제
+                is_drowsy = False
 
             # 하품 판단 (시간 기반)
             if current_mar > MAR_THRESHOLD:
@@ -221,10 +246,11 @@ def main():
                 elif current_time - yawn_start >= YAWN_TIME:
                     if not is_yawning:
                         print(f"[DEBUG] 하품 감지!")
+                        send_event(pipe_fd, "YAWN")
                     is_yawning = True
             else:
                 yawn_start = None
-                is_yawning = False  # 입을 다물면 하품 해제
+                is_yawning = False
 
             # 눈 랜드마크 그리기
             cv2.polylines(frame, [left_eye], True, (0, 255, 255), 1)
@@ -335,6 +361,9 @@ def main():
     # 정리
     cap.release()
     cv2.destroyAllWindows()
+    os.close(pipe_fd)
+    if os.path.exists(PIPE_PATH):
+        os.remove(PIPE_PATH)
     print("\n프로그램 종료")
 
 
