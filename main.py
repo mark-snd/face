@@ -13,6 +13,40 @@ import os
 import subprocess
 import time
 import stat
+import logging
+from datetime import datetime
+
+# 로그 설정
+LOG_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(LOG_DIR, f"detection_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+
+# 로거 설정
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# 포맷터
+formatter = logging.Formatter('%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s', datefmt='%H:%M:%S')
+
+# 파일 핸들러 (즉시 쓰기를 위해 open으로 직접 생성)
+file_handler = logging.FileHandler(LOG_FILE, mode='a')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(formatter)
+
+# 콘솔 핸들러
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.DEBUG)
+stream_handler.setFormatter(formatter)
+
+# 핸들러 추가
+logger.addHandler(file_handler)
+logger.addHandler(stream_handler)
+
+# 로그 즉시 기록을 위한 래퍼 함수
+_original_handle = logger.handle
+def _flush_handle(record):
+    _original_handle(record)
+    file_handler.flush()
+logger.handle = _flush_handle
 
 # Named Pipe 경로
 PIPE_PATH = "/tmp/face_status_pipe"
@@ -74,12 +108,58 @@ def play_alert_sound():
     )
 
 
+def find_builtin_camera():
+    """
+    맥북 빌트인 카메라를 찾아 인덱스 반환
+    연속성 카메라(iPhone)보다 빌트인 카메라를 우선 사용
+    """
+    try:
+        import AVFoundation
+        logger.info("카메라 검색 중...")
+
+        devices = AVFoundation.AVCaptureDevice.devicesWithMediaType_(
+            AVFoundation.AVMediaTypeVideo
+        )
+
+        builtin_index = None
+        # 빌트인 카메라 키워드: FaceTime, MacBook, Built-in
+        builtin_keywords = ["FaceTime", "MacBook", "Built-in"]
+        # 외장 카메라 키워드 (제외)
+        external_keywords = ["iPhone", "iPad", "Continuity"]
+
+        for i, device in enumerate(devices):
+            name = device.localizedName()
+            logger.debug(f"  카메라 {i}: {name}")
+
+            # 외장 카메라 제외
+            is_external = any(kw in name for kw in external_keywords)
+            is_builtin = any(kw in name for kw in builtin_keywords)
+
+            if not is_external and (is_builtin or builtin_index is None):
+                if builtin_index is None:
+                    builtin_index = i
+
+        if builtin_index is not None:
+            logger.info(f"빌트인 카메라 선택: 인덱스 {builtin_index}")
+            return builtin_index
+        elif devices:
+            logger.info(f"기본 카메라 사용: 인덱스 0")
+            return 0
+        else:
+            logger.warning("카메라를 찾을 수 없습니다.")
+            return 0
+
+    except ImportError:
+        logger.debug("AVFoundation 모듈 없음 - 기본 카메라(인덱스 0) 사용")
+        return 0
+
+
 def setup_pipe():
     """Named Pipe 생성"""
     if os.path.exists(PIPE_PATH):
         os.remove(PIPE_PATH)
     os.mkfifo(PIPE_PATH, mode=stat.S_IRUSR | stat.S_IWUSR)
-    print(f"이벤트 파이프 생성: {PIPE_PATH}")
+    logger.info(f"이벤트 파이프 생성: {PIPE_PATH}")
 
 
 def try_connect_pipe():
@@ -96,7 +176,7 @@ def send_event(pipe_fd, event_type):
     if pipe_fd is None:
         pipe_fd = try_connect_pipe()
         if pipe_fd is not None:
-            print("파이프 연결됨 (외부 수신자 감지)")
+            logger.info("파이프 연결됨 (외부 수신자 감지)")
 
     if pipe_fd is None:
         return pipe_fd
@@ -116,19 +196,19 @@ def main():
 
     # 모델 파일 확인
     if not os.path.exists(landmark_path):
-        print(f"오류: 랜드마크 모델 파일을 찾을 수 없습니다.")
-        print(f"경로: {landmark_path}")
-        print("다음 명령으로 다운로드하세요:")
-        print("curl -L -o shape_predictor_68_face_landmarks.dat.bz2 http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2")
-        print("bunzip2 shape_predictor_68_face_landmarks.dat.bz2")
+        logger.error(f"랜드마크 모델 파일을 찾을 수 없습니다.")
+        logger.error(f"경로: {landmark_path}")
+        logger.info("다음 명령으로 다운로드하세요:")
+        logger.info("curl -L -o shape_predictor_68_face_landmarks.dat.bz2 http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2")
+        logger.info("bunzip2 shape_predictor_68_face_landmarks.dat.bz2")
         return
 
     # 초기화
-    print("모델 로딩 중...")
+    logger.info("모델 로딩 중...")
     emotion_detector = FER(mtcnn=True)
     face_detector = dlib.get_frontal_face_detector()
     landmark_predictor = dlib.shape_predictor(landmark_path)
-    print("모델 로딩 완료!")
+    logger.info("모델 로딩 완료!")
 
     # 눈, 입 랜드마크 인덱스 (dlib 68 랜드마크 기준)
     LEFT_EYE = list(range(36, 42))
@@ -148,23 +228,43 @@ def main():
     setup_pipe()
     try:
         pipe_fd = os.open(PIPE_PATH, os.O_WRONLY | os.O_NONBLOCK)
-        print("파이프 연결됨 (외부 수신자 있음)")
+        logger.info("파이프 연결됨 (외부 수신자 있음)")
     except OSError:
         pipe_fd = None
-        print("파이프 수신자 없음 - 이벤트 전송 비활성화")
+        logger.debug("파이프 수신자 없음 - 이벤트 전송 비활성화")
 
-    # 카메라 시작
-    print("카메라 연결 중...")
-    cap = cv2.VideoCapture(0)
+    # 카메라 시작 (빌트인 카메라 우선)
+    camera_index = find_builtin_camera()
+
+    # 기본 백엔드로 시도 (AVFoundation 명시 제거)
+    cap = cv2.VideoCapture(camera_index)
     if not cap.isOpened():
-        print("오류: 카메라를 열 수 없습니다.")
-        print("macOS 시스템 설정 > 개인정보 보호 및 보안 > 카메라에서 터미널 접근을 허용해주세요.")
+        logger.error("카메라를 열 수 없습니다.")
+        logger.error("macOS 시스템 설정 > 개인정보 보호 및 보안 > 카메라에서 터미널 접근을 허용해주세요.")
         return
 
-    print("카메라 연결 완료!")
-    print("\n=== 얼굴 표정 인식 시작 ===")
-    print("종료: Ctrl + C")
-    print("============================\n")
+    # 카메라 설정
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+
+    # 카메라 워밍업 (첫 프레임 안정화 대기)
+    logger.info("카메라 초기화 중...")
+    time.sleep(1.0)
+
+    # 버퍼 비우기
+    for _ in range(30):
+        cap.grab()
+
+    ret, frame = cap.read()
+    if not ret or frame is None:
+        logger.error("카메라에서 프레임을 읽을 수 없습니다.")
+        cap.release()
+        return
+
+    logger.info(f"카메라 연결 완료! (해상도: {frame.shape[1]}x{frame.shape[0]})")
+    logger.info("=== 얼굴 표정 인식 시작 ===")
+    logger.info("종료: Ctrl + C")
 
     frame_count = 0
     emotion_result = None
@@ -172,7 +272,7 @@ def main():
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("프레임을 읽을 수 없습니다.")
+            logger.error("프레임을 읽을 수 없습니다.")
             break
 
         # 좌우 반전 (거울 모드)
@@ -201,19 +301,24 @@ def main():
 
             current_time = time.time()
 
+            # 매 프레임 EAR/MAR 로깅 (10프레임마다)
+            if frame_count % 10 == 0:
+                logger.debug(f"EAR={current_ear:.3f} (threshold={EAR_THRESHOLD}), MAR={current_mar:.3f} (threshold={MAR_THRESHOLD})")
+
             # 졸림 판단 (시간 기반)
             if current_ear < EAR_THRESHOLD:
                 if eye_closed_start is None:
                     eye_closed_start = current_time
-                    print(f"[DEBUG] 눈 감기 시작 - EAR: {current_ear:.3f}")
+                    logger.info(f"눈 감기 시작 - EAR: {current_ear:.3f}")
                 elif current_time - eye_closed_start >= DROWSY_TIME:
                     if not is_drowsy:
-                        print(f"[DEBUG] 졸림 감지! - {DROWSY_TIME}초 경과")
+                        logger.warning(f"졸림 감지! - {DROWSY_TIME}초 경과, EAR: {current_ear:.3f}")
                         pipe_fd = send_event(pipe_fd, "DROWSY")
                     is_drowsy = True
             else:
                 if eye_closed_start is not None:
-                    print(f"[DEBUG] 눈 뜸 - EAR: {current_ear:.3f}")
+                    duration = current_time - eye_closed_start
+                    logger.info(f"눈 뜸 - EAR: {current_ear:.3f}, 감은 시간: {duration:.2f}초")
                 eye_closed_start = None
                 is_drowsy = False
 
@@ -221,9 +326,10 @@ def main():
             if current_mar > MAR_THRESHOLD:
                 if yawn_start is None:
                     yawn_start = current_time
+                    logger.info(f"입 벌림 시작 - MAR: {current_mar:.3f}")
                 elif current_time - yawn_start >= YAWN_TIME:
                     if not is_yawning:
-                        print(f"[DEBUG] 하품 감지!")
+                        logger.warning(f"하품 감지! - MAR: {current_mar:.3f}")
                         pipe_fd = send_event(pipe_fd, "YAWN")
                     is_yawning = True
             else:
@@ -257,80 +363,80 @@ def main():
             if emotions:
                 emotion_result = emotions[0]
 
-        # 결과 표시 영역 (화면 왼쪽 상단) - 2배 크기
+        # 결과 표시 영역 (화면 왼쪽 상단)
         overlay = frame.copy()
-        cv2.rectangle(overlay, (10, 10), (640, 500), (0, 0, 0), -1)
+        cv2.rectangle(overlay, (10, 10), (320, 250), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
 
-        y_pos = 60
-        cv2.putText(frame, "=== Status ===", (30, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+        y_pos = 35
+        cv2.putText(frame, "=== Status ===", (20, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         # EAR/MAR 표시
-        y_pos += 50
+        y_pos += 25
         ear_color = (0, 0, 255) if current_ear < EAR_THRESHOLD else (200, 200, 200)
-        cv2.putText(frame, f"EAR: {current_ear:.2f} (< {EAR_THRESHOLD})", (30, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, ear_color, 2)
-        y_pos += 40
-        cv2.putText(frame, f"MAR: {current_mar:.2f}", (30, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (200, 200, 200), 2)
+        cv2.putText(frame, f"EAR: {current_ear:.2f} (< {EAR_THRESHOLD})", (20, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, ear_color, 1)
+        y_pos += 20
+        cv2.putText(frame, f"MAR: {current_mar:.2f}", (20, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
         # 눈 감은 시간 표시
-        y_pos += 40
+        y_pos += 20
         if eye_closed_start is not None:
             closed_duration = time.time() - eye_closed_start
-            cv2.putText(frame, f"Eyes closed: {closed_duration:.1f}s / {DROWSY_TIME:.1f}s", (30, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 255), 2)
+            cv2.putText(frame, f"Eyes closed: {closed_duration:.1f}s / {DROWSY_TIME:.1f}s", (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
         else:
-            cv2.putText(frame, "Eyes: Open", (30, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (200, 200, 200), 2)
+            cv2.putText(frame, "Eyes: Open", (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
         # 졸림/하품 상태 표시
-        y_pos += 50
+        y_pos += 25
         if is_drowsy:
-            cv2.putText(frame, "DROWSY!", (30, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 0, 255), 3)
+            cv2.putText(frame, "DROWSY!", (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
         else:
-            cv2.putText(frame, "Drowsy: No", (30, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+            cv2.putText(frame, "Drowsy: No", (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-        y_pos += 50
+        y_pos += 25
         if is_yawning:
-            cv2.putText(frame, "YAWNING!", (30, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.4, (0, 165, 255), 3)
+            cv2.putText(frame, "YAWNING!", (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 165, 255), 2)
         else:
-            cv2.putText(frame, "Yawn: No", (30, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2)
+            cv2.putText(frame, "Yawn: No", (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
         # 표정 결과 표시
-        y_pos += 60
-        cv2.putText(frame, "=== Emotion ===", (30, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+        y_pos += 30
+        cv2.putText(frame, "=== Emotion ===", (20, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         if emotion_result:
             emotions = emotion_result['emotions']
             dominant = max(emotions, key=emotions.get)
             confidence = emotions[dominant]
 
-            y_pos += 50
+            y_pos += 25
             color = (0, 255, 0) if confidence > 0.5 else (0, 255, 255)
-            cv2.putText(frame, f"{dominant}: {confidence*100:.1f}%", (30, y_pos),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 3)
+            cv2.putText(frame, f"{dominant}: {confidence*100:.1f}%", (20, y_pos),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
         # 경고 알림 (화면 중앙 상단) + 경고음
         current_time = time.time()
         if is_drowsy or is_yawning:
             # 화면 중앙 상단에 Wake up 경고
             text = "Wake up!"
-            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 3.0, 5)[0]
+            text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 1.5, 3)[0]
             text_x = (frame.shape[1] - text_size[0]) // 2
-            cv2.putText(frame, text, (text_x, 120),
-                        cv2.FONT_HERSHEY_SIMPLEX, 3.0, (0, 0, 255), 5)
+            cv2.putText(frame, text, (text_x, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
             # 경고음 재생 (쿨다운 적용)
             if current_time - last_alert_time > ALERT_COOLDOWN:
                 play_alert_sound()
                 last_alert_time = current_time
-                print(f"[경고] {'졸림' if is_drowsy else ''} {'하품' if is_yawning else ''} 감지!")
+                logger.warning(f"경고음 재생 - 졸림:{is_drowsy}, 하품:{is_yawning}")
 
         # 화면 출력
         cv2.imshow('Facial Expression & Drowsiness Detection', frame)
@@ -343,12 +449,15 @@ def main():
         os.close(pipe_fd)
     if os.path.exists(PIPE_PATH):
         os.remove(PIPE_PATH)
-    print("\n프로그램 종료")
+    logger.info("프로그램 종료")
+    logger.info(f"로그 파일 저장됨: {LOG_FILE}")
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\nCtrl+C 감지 - 프로그램 종료")
+        logger.info("Ctrl+C 감지 - 프로그램 종료")
         cv2.destroyAllWindows()
+    finally:
+        logging.shutdown()
