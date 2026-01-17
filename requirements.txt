@@ -1,0 +1,5 @@
+opencv-python
+fer
+dlib
+numpy
+scipy
