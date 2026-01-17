@@ -9,11 +9,9 @@ import numpy as np
 from fer.fer import FER
 import dlib
 from scipy.spatial import distance as dist
-from collections import deque
 import os
 import subprocess
 import time
-import argparse
 import stat
 
 # Named Pipe 경로
@@ -86,54 +84,15 @@ def setup_pipe():
 
 def send_event(pipe_fd, event_type):
     """파이프로 이벤트 전송 (non-blocking)"""
+    if pipe_fd is None:
+        return
     try:
         os.write(pipe_fd, f"{event_type}\n".encode())
-    except (BrokenPipeError, BlockingIOError):
+    except (BrokenPipeError, BlockingIOError, OSError):
         pass  # 수신자가 없거나 버퍼가 찼으면 무시
 
 
-def list_cameras():
-    """사용 가능한 카메라 목록 출력"""
-    print("사용 가능한 카메라 검색 중...")
-    available = []
-    for i in range(10):
-        cap = cv2.VideoCapture(i)
-        if cap.isOpened():
-            # 카메라 이름 가져오기 시도
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            available.append((i, width, height))
-            cap.release()
-
-    if available:
-        print("\n사용 가능한 카메라:")
-        for idx, w, h in available:
-            print(f"  [{idx}] 카메라 {idx} ({w}x{h})")
-        print("\n일반적으로:")
-        print("  - 카메라 0: MacBook 내장 카메라")
-        print("  - 카메라 1: iPhone 연속성 카메라 (연결된 경우)")
-    else:
-        print("사용 가능한 카메라가 없습니다.")
-
-    return available
-
-
 def main():
-    # 명령행 인자 파싱
-    parser = argparse.ArgumentParser(description='얼굴 표정 인식 및 졸림 감지')
-    parser.add_argument('-c', '--camera', type=int, default=0,
-                        help='카메라 인덱스 (기본값: 0, MacBook 내장 카메라)')
-    parser.add_argument('-l', '--list', action='store_true',
-                        help='사용 가능한 카메라 목록 표시')
-    args = parser.parse_args()
-
-    # 카메라 목록 표시 모드
-    if args.list:
-        list_cameras()
-        return
-
-    camera_index = args.camera
-
     # 모델 경로
     script_dir = os.path.dirname(os.path.abspath(__file__))
     landmark_path = os.path.join(script_dir, "shape_predictor_68_face_landmarks.dat")
@@ -170,22 +129,24 @@ def main():
 
     # Named Pipe 설정 (non-blocking 쓰기 모드)
     setup_pipe()
-    pipe_fd = os.open(PIPE_PATH, os.O_WRONLY | os.O_NONBLOCK)
+    try:
+        pipe_fd = os.open(PIPE_PATH, os.O_WRONLY | os.O_NONBLOCK)
+        print("파이프 연결됨 (외부 수신자 있음)")
+    except OSError:
+        pipe_fd = None
+        print("파이프 수신자 없음 - 이벤트 전송 비활성화")
 
     # 카메라 시작
-    print(f"카메라 {camera_index} 연결 중...")
-    cap = cv2.VideoCapture(camera_index)
+    print("카메라 연결 중...")
+    cap = cv2.VideoCapture(0)
     if not cap.isOpened():
-        print(f"오류: 카메라 {camera_index}를 열 수 없습니다.")
+        print("오류: 카메라를 열 수 없습니다.")
         print("macOS 시스템 설정 > 개인정보 보호 및 보안 > 카메라에서 터미널 접근을 허용해주세요.")
-        print("\n다른 카메라를 사용하려면: python main.py -c [카메라번호]")
-        print("카메라 목록 확인: python main.py -l")
         return
 
-    print(f"카메라 {camera_index} 연결 완료!")
+    print("카메라 연결 완료!")
     print("\n=== 얼굴 표정 인식 시작 ===")
     print("종료: Ctrl + C")
-    print("카메라 변경: python main.py -c [번호]")
     print("============================\n")
 
     frame_count = 0
@@ -361,7 +322,8 @@ def main():
     # 정리
     cap.release()
     cv2.destroyAllWindows()
-    os.close(pipe_fd)
+    if pipe_fd is not None:
+        os.close(pipe_fd)
     if os.path.exists(PIPE_PATH):
         os.remove(PIPE_PATH)
     print("\n프로그램 종료")
