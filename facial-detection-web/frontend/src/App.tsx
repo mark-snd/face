@@ -165,7 +165,7 @@ export default function App() {
       <footer className="fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 py-2 px-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between text-sm text-gray-400">
           <span>웹 기반 얼굴 표정 & 졸음 감지 시스템</span>
-          <span>face-api.js + React</span>
+          <span>MediaPipe + React</span>
         </div>
       </footer>
     </div>

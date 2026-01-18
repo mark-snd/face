@@ -3,22 +3,22 @@ export interface Point {
   y: number;
 }
 
-export interface Emotions {
-  neutral: number;
-  happy: number;
-  sad: number;
-  angry: number;
-  fearful: number;
-  disgusted: number;
-  surprised: number;
+export type Emotions = Record<string, number>;
+
+export interface BlendshapeScore {
+  name: string;
+  score: number;
 }
 
 export interface DetectionResult {
   ear: number;
   mar: number;
+  blinkScore: number;
+  jawOpenScore: number;
   emotions: Emotions;
   dominantEmotion: string;
   confidence: number;
+  blendshapes: BlendshapeScore[];
   landmarks: Point[];
   faceBox: {
     x: number;

@@ -46,6 +46,10 @@ export function VideoPreview({
           // Mirror coordinates for drawing
           const mirrorX = (x: number) => canvas.width - x;
 
+          const leftEyeIdx = [33, 160, 158, 133, 153, 144];
+          const rightEyeIdx = [362, 385, 387, 263, 373, 380];
+          const mouthIdx = [61, 81, 13, 311, 291, 402, 14, 178];
+
           // Draw face box
           if (showFaceBox) {
             const box = latestResult.faceBox;
@@ -63,26 +67,24 @@ export function VideoPreview({
           if (showLandmarks && latestResult.landmarks) {
             ctx.fillStyle = '#3b82f6';
 
-            // Draw eye landmarks (indices 36-47)
-            for (let i = 36; i < 48; i++) {
-              const point = latestResult.landmarks[i];
-              if (point) {
-                ctx.beginPath();
-                ctx.arc(mirrorX(point.x), point.y, 2, 0, Math.PI * 2);
-                ctx.fill();
-              }
-            }
+            // Draw eye landmarks
+            [...leftEyeIdx, ...rightEyeIdx].forEach((idx) => {
+              const point = latestResult.landmarks[idx];
+              if (!point) return;
+              ctx.beginPath();
+              ctx.arc(mirrorX(point.x), point.y, 2, 0, Math.PI * 2);
+              ctx.fill();
+            });
 
-            // Draw mouth landmarks (indices 48-67)
+            // Draw mouth landmarks
             ctx.fillStyle = '#ec4899';
-            for (let i = 48; i < 68; i++) {
-              const point = latestResult.landmarks[i];
-              if (point) {
-                ctx.beginPath();
-                ctx.arc(mirrorX(point.x), point.y, 2, 0, Math.PI * 2);
-                ctx.fill();
-              }
-            }
+            mouthIdx.forEach((idx) => {
+              const point = latestResult.landmarks[idx];
+              if (!point) return;
+              ctx.beginPath();
+              ctx.arc(mirrorX(point.x), point.y, 2, 0, Math.PI * 2);
+              ctx.fill();
+            });
           }
         }
       }

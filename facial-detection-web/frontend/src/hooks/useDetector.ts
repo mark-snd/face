@@ -67,27 +67,65 @@ export function useDetector(options: UseDetectorOptions = {}): UseDetectorReturn
     }
   }, []);
 
+  const lastFaceDetectedRef = useRef<number>(0);
+  const fpsCounterRef = useRef<{ count: number; lastTime: number }>({ count: 0, lastTime: Date.now() });
+
   const processDetection = useCallback(
     (result: DetectionResult | null) => {
       const now = Date.now();
       const config = configRef.current;
 
+      // FPS counter
+      fpsCounterRef.current.count++;
+      if (now - fpsCounterRef.current.lastTime >= 1000) {
+        console.log(`Detection FPS: ${fpsCounterRef.current.count}`);
+        fpsCounterRef.current = { count: 0, lastTime: now };
+      }
+
       if (!result) {
+        // If face was recently detected (within 500ms), keep the eye closure timer running
+        // This handles cases where face detection briefly fails when eyes are closed
+        const timeSinceLastFace = now - lastFaceDetectedRef.current;
+        const keepTimerRunning = timeSinceLastFace < 500 && eyesClosedStartRef.current !== null;
+
+        if (!keepTimerRunning) {
+          eyesClosedStartRef.current = null;
+          mouthOpenStartRef.current = null;
+        } else {
+          // Continue tracking drowsiness even without face detection
+          const eyesClosedDuration = (now - eyesClosedStartRef.current!) / 1000;
+          if (eyesClosedDuration >= config.drowsyTime) {
+            if (now - lastDrowsyAlertRef.current > config.alertCooldown * 1000) {
+              lastDrowsyAlertRef.current = now;
+              alerter.playDrowsyAlert();
+              alerter.showNotification('졸음 감지!', '잠시 휴식이 필요합니다.');
+            }
+            setState((prev) => ({
+              ...prev,
+              isFaceDetected: false,
+              isDrowsy: true,
+              eyesClosedDuration,
+            }));
+            return;
+          }
+        }
+
         setState((prev) => ({
           ...prev,
           isFaceDetected: false,
           currentEAR: 0,
           currentMAR: 0,
         }));
-        eyesClosedStartRef.current = null;
-        mouthOpenStartRef.current = null;
         return;
       }
+
+      lastFaceDetectedRef.current = now;
 
       setLatestResult(result);
       options.onDetection?.(result);
 
       const { ear, mar, dominantEmotion, confidence } = result;
+      console.log(`EAR: ${ear.toFixed(3)}, MAR: ${mar.toFixed(3)}`);
 
       // Eye closure detection
       let eyesClosedDuration = 0;

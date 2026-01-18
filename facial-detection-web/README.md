@@ -6,17 +6,16 @@
 
 - **눈 감김 감지 (EAR)**: Eye Aspect Ratio 기반 졸음 감지
 - **하품 감지 (MAR)**: Mouth Aspect Ratio 기반 하품 감지
-- **감정 인식**: 7가지 감정 (neutral, happy, sad, angry, fearful, disgusted, surprised)
+- **감정 인식**: MediaPipe Face Landmarker blendshape 기반 요약 (neutral, happy, frown, surprise)
 - **실시간 알림**: 브라우저 알림 및 경고음
 - **이벤트 로깅**: WebSocket을 통한 서버 이벤트 전송
-- **GPU 가속**: WebGPU 백엔드 지원 (Apple Silicon 최적화)
+- **GPU 가속**: MediaPipe WebAssembly + SIMD (브라우저 최적화)
 
 ## 기술 스택
 
 ### Frontend
 - React 18 + TypeScript
-- face-api.js (얼굴 감지 및 감정 인식)
-- TensorFlow.js (WebGPU/WebGL 백엔드)
+- MediaPipe Tasks (Face Landmarker + blendshape)
 - Tailwind CSS
 - Vite
 
@@ -37,28 +36,15 @@
 ### 개발 환경 설정
 
 1. **face-api.js 모델 다운로드**
+   > MediaPipe로 교체되었습니다. 기존 face-api.js 모델은 더 이상 필요하지 않습니다.
 
-```bash
-# frontend/public/models 디렉토리에 모델 파일 다운로드
-mkdir -p frontend/public/models
-cd frontend/public/models
-
-# 필요한 모델들:
-# - tiny_face_detector_model-weights_manifest.json
-# - tiny_face_detector_model-shard1
-# - face_landmark_68_model-weights_manifest.json
-# - face_landmark_68_model-shard1
-# - face_expression_model-weights_manifest.json
-# - face_expression_model-shard1
-
-# justadudewhohacks/face-api.js에서 다운로드
-curl -L -O https://github.com/justadudewhohacks/face-api.js/raw/master/weights/tiny_face_detector_model-weights_manifest.json
-curl -L -O https://github.com/justadudewhohacks/face-api.js/raw/master/weights/tiny_face_detector_model-shard1
-curl -L -O https://github.com/justadudewhohacks/face-api.js/raw/master/weights/face_landmark_68_model-weights_manifest.json
-curl -L -O https://github.com/justadudewhohacks/face-api.js/raw/master/weights/face_landmark_68_model-shard1
-curl -L -O https://github.com/justadudewhohacks/face-api.js/raw/master/weights/face_expression_model-weights_manifest.json
-curl -L -O https://github.com/justadudewhohacks/face-api.js/raw/master/weights/face_expression_model-shard1
-```
+> 기본적으로 CDN에서 모델을 불러옵니다. 로컬에 두고 싶다면 아래 명령을 실행하세요.
+>
+> ```bash
+> mkdir -p frontend/public/models
+> curl -L -o frontend/public/models/face_landmarker.task \
+>   https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
+> ```
 
 2. **프론트엔드 실행**
 
@@ -98,7 +84,7 @@ facial-detection-web/
 │   │   ├── hooks/           # React 훅
 │   │   ├── lib/             # 유틸리티 및 감지 로직
 │   │   └── types/           # TypeScript 타입
-│   └── public/models/       # face-api.js 모델
+│   └── public/models/       # MediaPipe 모델 (.task)
 ├── backend/                  # FastAPI 백엔드
 │   └── app/
 │       ├── api/             # API 엔드포인트
@@ -118,14 +104,12 @@ facial-detection-web/
 | 하품 감지 시간 | 1.0초 | 입 벌림 지속 시간 |
 | 알림 간격 | 3.0초 | 알림 쿨다운 |
 | 카메라 해상도 | 320x240 | 성능 최적화를 위한 저해상도 |
-| 감지 입력 크기 | 160px | TinyFaceDetector inputSize |
 
 ## 성능 최적화
 
-- **WebGPU 백엔드**: Apple Silicon (M1/M2/M3/M4) GPU 가속 지원
-- **WebGL 폴백**: WebGPU 미지원 브라우저에서 자동 전환
+- **MediaPipe Tasks**: WebAssembly + SIMD 최적화
 - **저해상도 카메라**: 320x240 해상도로 처리량 최소화
-- **최적화된 모델**: TinyFaceDetector (inputSize: 160)로 빠른 감지
+- **브라우저 캐싱**: 모델(.task) 파일을 CDN 대신 로컬 `/public/models`에서 로드
 
 ## API 엔드포인트
 

@@ -50,8 +50,8 @@ export function useCamera(): UseCameraReturn {
 
       const constraints: MediaStreamConstraints = {
         video: {
-          width: { ideal: 320 },
-          height: { ideal: 240 },
+          width: { ideal: 640 },
+          height: { ideal: 480 },
           frameRate: { ideal: 30 },
           facingMode: 'user',
           ...(deviceId ? { deviceId: { exact: deviceId } } : {}),

@@ -24,11 +24,8 @@ export function StatusDashboard({ state, config }: StatusDashboardProps) {
     const emojiMap: Record<string, string> = {
       neutral: '😐',
       happy: '😊',
-      sad: '😢',
-      angry: '😠',
-      fearful: '😨',
-      disgusted: '🤢',
-      surprised: '😲',
+      frown: '😠',
+      surprise: '😲',
     };
     return emojiMap[emotion] || '😐';
   };
@@ -37,11 +34,8 @@ export function StatusDashboard({ state, config }: StatusDashboardProps) {
     const koreanMap: Record<string, string> = {
       neutral: '무표정',
       happy: '행복',
-      sad: '슬픔',
-      angry: '화남',
-      fearful: '두려움',
-      disgusted: '혐오',
-      surprised: '놀람',
+      frown: '찡그림',
+      surprise: '놀람',
     };
     return koreanMap[emotion] || emotion;
   };

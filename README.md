@@ -4,9 +4,9 @@
 
 ## 주요 기능
 
-- **표정 인식**: FER 라이브러리를 사용하여 7가지 표정 감지 (angry, disgust, fear, happy, sad, surprise, neutral)
-- **졸림 감지**: EAR (Eye Aspect Ratio) 알고리즘으로 눈 감김 상태 측정
-- **하품 감지**: MAR (Mouth Aspect Ratio) 알고리즘으로 하품 감지
+- **표정 인식**: MediaPipe Face Landmarker의 blendshape를 활용해 happy/frown/surprise/neutral 요약 및 상위 블렌드셰이프 표시
+- **졸림 감지**: EAR (Eye Aspect Ratio) + MediaPipe `eyeBlink*` 블렌드셰이프 조합으로 눈 감김 상태 측정
+- **하품 감지**: MAR (Mouth Aspect Ratio) + MediaPipe `jawOpen` 블렌드셰이프 조합으로 하품 감지
 - **실시간 경고**: 졸림/하품 감지 시 시각적 경고 및 macOS 시스템 경고음 재생
 - **외부 연동**: Named Pipe를 통해 외부 프로그램에 이벤트 전송
 - **로그 기록**: 모든 감지 이벤트를 타임스탬프와 함께 파일에 기록
@@ -16,33 +16,38 @@
 | 라이브러리 | 용도 |
 |-----------|------|
 | OpenCV | 카메라 입력 및 화면 출력 |
-| FER | 딥러닝 기반 표정 인식 (MTCNN) |
-| dlib | 얼굴 랜드마크 68점 추출 |
-| scipy | 유클리드 거리 계산 |
+| MediaPipe | Face Landmarker로 얼굴/블렌드셰이프 추출 |
+| numpy | 계산 및 랜드마크 좌표 처리 |
 
 ## 알고리즘
 
 ### EAR (Eye Aspect Ratio)
-눈의 세로/가로 비율로 눈 감김 정도를 측정합니다.
+MediaPipe 얼굴 랜드마크로 눈의 세로/가로 비율을 계산합니다.
 - 임계값: 0.22 미만일 때 눈 감김으로 판단
 - 2초 이상 지속 시 졸림 경고
 
 ### MAR (Mouth Aspect Ratio)
-입의 세로/가로 비율로 하품을 감지합니다.
+MediaPipe 얼굴 랜드마크로 입의 세로/가로 비율을 계산합니다.
 - 임계값: 0.6 초과일 때 입 벌림으로 판단
 - 1초 이상 지속 시 하품 경고
+
+### MediaPipe Blendshape 신호
+- `eyeBlinkLeft/Right` ≥ 0.45: 눈 감김 신호로 활용
+- `jawOpen` ≥ 0.35: 입 벌림/하품 신호로 활용
+- 표정 요약: `mouthSmile*`, `mouthFrown*`, `browDown*`, `eyeWide*`, `jawOpen` 조합으로 happy/frown/surprise/neutral 산출
 
 ## 설치
 
 ### 1. 의존성 설치
 ```bash
-pip install opencv-python numpy fer dlib scipy
+pip install -r requirements.txt
 ```
 
-### 2. dlib 랜드마크 모델 다운로드
+### 2. MediaPipe Face Landmarker 모델 다운로드
 ```bash
-curl -L -o shape_predictor_68_face_landmarks.dat.bz2 http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2
-bunzip2 shape_predictor_68_face_landmarks.dat.bz2
+mkdir -p models
+curl -L -o models/face_landmarker.task \
+  https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task
 ```
 
 ## 사용법
@@ -57,17 +62,22 @@ python main.py
 |-----|------|
 | EAR | 현재 눈 종횡비 (낮을수록 눈 감김) |
 | MAR | 현재 입 종횡비 (높을수록 입 벌림) |
+| Blink | MediaPipe `eyeBlink` 블렌드셰이프 스코어 |
+| JawOpen | MediaPipe `jawOpen` 블렌드셰이프 스코어 |
 | Eyes closed | 눈 감은 시간 / 졸림 판단 시간 |
 | DROWSY! | 졸림 감지 경고 (빨간색) |
 | YAWNING! | 하품 감지 경고 (주황색) |
 | Emotion | 현재 감지된 표정 및 신뢰도 |
+| Top blendshapes | 상위 블렌드셰이프 이름/스코어 |
 
 ## 설정값
 
 | 변수 | 기본값 | 설명 |
 |-----|-------|------|
-| `EAR_THRESHOLD` | 0.22 | 눈 감김 판단 임계값 |
-| `MAR_THRESHOLD` | 0.6 | 하품 판단 임계값 |
+| `EAR_THRESHOLD` | 0.22 | 눈 감김 판단 임계값 (MediaPipe 랜드마크) |
+| `MAR_THRESHOLD` | 0.6 | 하품 판단 임계값 (MediaPipe 랜드마크) |
+| `BLINK_SCORE_THRESHOLD` | 0.45 | MediaPipe `eyeBlink*` 블렌드셰이프 임계값 |
+| `JAW_OPEN_SCORE_THRESHOLD` | 0.35 | MediaPipe `jawOpen` 블렌드셰이프 임계값 |
 | `DROWSY_TIME` | 2.0초 | 졸림 판단까지 필요한 시간 |
 | `YAWN_TIME` | 1.0초 | 하품 판단까지 필요한 시간 |
 | `ALERT_COOLDOWN` | 3.0초 | 경고음 재생 간격 |
@@ -220,4 +230,12 @@ detection_YYYYMMDD_HHMMSS.log
 
 ## 종료
 
-`Ctrl + C` 또는 창 닫기
+다음 방법으로 프로그램을 종료할 수 있습니다:
+
+| 방법 | 설명 |
+|-----|------|
+| `ESC` 키 | 카메라 창에서 ESC 키 입력 |
+| `q` 키 | 카메라 창에서 q 키 입력 |
+| `Ctrl + C` | 터미널에서 인터럽트 |
+
+> **Note**: macOS에서 OpenCV 창의 빨간 닫기(X) 버튼은 비활성화되어 있습니다. 이는 OpenCV의 macOS 백엔드 제한사항입니다. ESC 또는 q 키를 사용해 주세요.
