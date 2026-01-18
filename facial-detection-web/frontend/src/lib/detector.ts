@@ -1,4 +1,6 @@
 import * as faceapi from '@vladmandic/face-api';
+import * as tf from '@tensorflow/tfjs';
+import '@tensorflow/tfjs-backend-webgpu';
 import type { Point, DetectionResult, Emotions } from '@/types';
 
 export class FaceDetector {
@@ -13,6 +15,19 @@ export class FaceDetector {
     }
 
     try {
+      // Initialize TensorFlow.js backend - prefer WebGPU for Apple Silicon
+      try {
+        await tf.setBackend('webgpu');
+        await tf.ready();
+        console.log('TensorFlow.js using WebGPU backend');
+      } catch {
+        // Fallback to WebGL if WebGPU not available
+        await tf.setBackend('webgl');
+        await tf.ready();
+        console.log('TensorFlow.js using WebGL backend (fallback)');
+      }
+      console.log('TensorFlow.js backend ready:', tf.getBackend());
+
       await Promise.all([
         faceapi.nets.tinyFaceDetector.loadFromUri(this.modelPath),
         faceapi.nets.faceLandmark68Net.loadFromUri(this.modelPath),
@@ -40,8 +55,8 @@ export class FaceDetector {
 
     const detection = await faceapi
       .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({
-        inputSize: 416,
-        scoreThreshold: 0.5,
+        inputSize: 160,
+        scoreThreshold: 0.4,
       }))
       .withFaceLandmarks()
       .withFaceExpressions();

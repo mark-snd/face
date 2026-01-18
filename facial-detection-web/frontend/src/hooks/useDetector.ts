@@ -158,16 +158,30 @@ export function useDetector(options: UseDetectorOptions = {}): UseDetectorReturn
       }
 
       setState((prev) => ({ ...prev, isDetecting: true }));
+      let isRunning = true;
 
       const detect = async () => {
+        if (!isRunning) return;
+
         if (videoElement.readyState >= 2) {
           const result = await faceDetector.detect(videoElement);
           processDetection(result);
         }
-        animationFrameRef.current = requestAnimationFrame(detect);
+
+        if (isRunning) {
+          // Request next frame immediately after detection completes
+          animationFrameRef.current = requestAnimationFrame(detect);
+        }
       };
 
       detect();
+
+      // Store cleanup function
+      const originalStop = stopDetection;
+      return () => {
+        isRunning = false;
+        originalStop();
+      };
     },
     [isModelLoaded, processDetection]
   );
